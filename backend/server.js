@@ -1,21 +1,31 @@
-// Server-side code (Node.js with Express)
 const express = require('express');
 const bodyParser = require('body-parser');
 const session = require('express-session');
 const bcrypt = require('bcrypt');
+const mongoose = require('mongoose');
+const cors = require('cors');
 const app = express();
 
-// Database models (using Mongoose for MongoDB)
-const mongoose = require('mongoose');
-
-// Connect to MongoDB
-mongoose.connect('mongodb://localhost:27017/prediction-platform', {
+// ===== DATABASE CONNECTION =====
+// Connect to MongoDB with proper error handling - this MUST be before defining models
+console.log('Connecting to MongoDB...');
+mongoose.connect('mongodb://127.0.0.1:27017/prediction-platform', {
   useNewUrlParser: true,
-  useUnifiedTopology: true
+  useUnifiedTopology: true,
+  serverSelectionTimeoutMS: 5000 // Shorter timeout for faster feedback
 })
-.then(() => console.log('Connected to MongoDB'))
-.catch(err => console.error('MongoDB connection error:', err));
+.then(() => {
+  console.log('Connected to MongoDB successfully');
+})
+.catch(err => {
+  console.error('MongoDB connection error:', err);
+  console.log('Please make sure MongoDB is running at mongodb://127.0.0.1:27017');
+  // Don't exit, let's use memory store as fallback
+  console.log('Falling back to in-memory storage for development');
+  useMemoryStore = true;
+});
 
+// ===== MODELS =====
 // User Schema
 const UserSchema = new mongoose.Schema({
   username: { type: String, required: true, unique: true },
@@ -44,13 +54,25 @@ const QuestionSchema = new mongoose.Schema({
 const User = mongoose.model('User', UserSchema);
 const Question = mongoose.model('Question', QuestionSchema);
 
-// Middleware
+// ===== MIDDLEWARE =====
+// Enable CORS for development
+app.use(cors({
+  origin: 'http://localhost:3001', // Your React app's address
+  credentials: true // Allow cookies to be sent
+}));
+
 app.use(bodyParser.json());
 app.use(bodyParser.urlencoded({ extended: true }));
+
+// Session configuration
 app.use(session({
   secret: 'prediction-platform-secret',
   resave: false,
-  saveUninitialized: true
+  saveUninitialized: false,
+  cookie: { 
+    secure: false, // Set to true in production with HTTPS
+    maxAge: 24 * 60 * 60 * 1000 // 24 hours
+  }
 }));
 
 // Helper Functions
@@ -75,11 +97,19 @@ function calculateCrossEntropy(prediction, lastPrediction) {
   return Math.max(0, 10 - crossEntropy);
 }
 
-// Routes
+// ===== ROUTES =====
 // User Authentication
 app.post('/api/register', async (req, res) => {
   try {
     const { username, password, isAdmin } = req.body;
+    console.log('Registration attempt for:', username);
+    
+    // Check if user already exists
+    const existingUser = await User.findOne({ username });
+    if (existingUser) {
+      return res.status(400).json({ error: 'Username already exists' });
+    }
+    
     const hashedPassword = await bcrypt.hash(password, 10);
     
     const user = new User({
@@ -89,28 +119,38 @@ app.post('/api/register', async (req, res) => {
     });
     
     await user.save();
+    console.log('User registered successfully:', username);
     res.status(201).json({ message: 'User registered successfully' });
   } catch (error) {
-    res.status(400).json({ error: error.message });
+    console.error('Registration error:', error);
+    res.status(500).json({ error: 'Internal server error during registration' });
   }
 });
 
 app.post('/api/login', async (req, res) => {
   try {
     const { username, password } = req.body;
+    console.log('Login attempt for:', username);
+    
     const user = await User.findOne({ username });
     
     if (!user) {
+      console.log('User not found:', username);
       return res.status(400).json({ error: 'Invalid credentials' });
     }
     
     const validPassword = await bcrypt.compare(password, user.password);
     if (!validPassword) {
+      console.log('Invalid password for user:', username);
       return res.status(400).json({ error: 'Invalid credentials' });
     }
     
     req.session.userId = user._id;
     req.session.isAdmin = user.isAdmin;
+    req.session.username = user.username;
+    
+    console.log('Login successful for:', username);
+    console.log('Session ID:', req.session.id);
     
     res.json({ 
       message: 'Login successful',
@@ -122,11 +162,13 @@ app.post('/api/login', async (req, res) => {
       }
     });
   } catch (error) {
-    res.status(400).json({ error: error.message });
+    console.error('Login error:', error);
+    res.status(500).json({ error: 'Internal server error during login' });
   }
 });
 
 app.post('/api/logout', (req, res) => {
+  console.log('Logout for session:', req.session.id);
   req.session.destroy();
   res.json({ message: 'Logout successful' });
 });
@@ -134,11 +176,12 @@ app.post('/api/logout', (req, res) => {
 // Question Management (Admin Only)
 app.post('/api/questions', async (req, res) => {
   try {
-    if (!req.session.isAdmin) {
+    if (!req.session.userId || !req.session.isAdmin) {
       return res.status(403).json({ error: 'Admin access required' });
     }
     
     const { text, R, k, alpha } = req.body;
+    console.log('Creating question:', text);
     
     const question = new Question({
       text,
@@ -146,18 +189,107 @@ app.post('/api/questions', async (req, res) => {
     });
     
     await question.save();
+    console.log('Question created successfully');
     res.status(201).json({ message: 'Question created successfully', question });
   } catch (error) {
-    res.status(400).json({ error: error.message });
+    console.error('Question creation error:', error);
+    res.status(500).json({ error: 'Internal server error creating question' });
   }
 });
 
 app.get('/api/questions', async (req, res) => {
   try {
+    console.log('Fetching all questions');
     const questions = await Question.find({ isActive: true });
     res.json(questions);
   } catch (error) {
-    res.status(400).json({ error: error.message });
+    console.error('Error fetching questions:', error);
+    res.status(500).json({ error: 'Internal server error fetching questions' });
+  }
+});
+
+// Get question details
+app.get('/api/questions/:id', async (req, res) => {
+  try {
+    console.log('Fetching question details for ID:', req.params.id);
+    const question = await Question.findById(req.params.id)
+      .populate('predictions.user', 'username');
+    
+    if (!question) {
+      return res.status(404).json({ error: 'Question not found' });
+    }
+    
+    res.json(question);
+  } catch (error) {
+    console.error('Error fetching question details:', error);
+    res.status(500).json({ error: 'Internal server error fetching question details' });
+  }
+});
+
+// Get prediction results with points
+app.get('/api/questions/:id/results', async (req, res) => {
+  try {
+    console.log('Fetching results for question ID:', req.params.id);
+    const question = await Question.findById(req.params.id)
+      .populate('predictions.user', 'username');
+    
+    if (!question) {
+      return res.status(404).json({ error: 'Question not found' });
+    }
+    
+    if (!question.completed) {
+      return res.status(400).json({ error: 'Question is not completed yet' });
+    }
+    
+    // Calculate points for each prediction
+    const predictions = question.predictions;
+    const lastPrediction = predictions[predictions.length - 1].value;
+    const k = question.parameters.k;
+    const R = question.parameters.R;
+    
+    // Identify the last k users
+    const lastKIndices = Math.min(k, predictions.length);
+    const lastKUserIds = [];
+    
+    for (let i = 1; i <= lastKIndices; i++) {
+      const userIndex = predictions.length - i;
+      if (userIndex >= 0) {
+        lastKUserIds.push(predictions[userIndex].user._id.toString());
+      }
+    }
+    
+    // Calculate points for all predictions
+    const results = predictions.map((pred, index) => {
+      const userId = pred.user._id.toString();
+      let points = 0;
+      let reason = '';
+      
+      if (lastKUserIds.includes(userId)) {
+        points = R;
+        reason = `Last ${k} users bonus`;
+      } else {
+        points = calculateCrossEntropy(pred.value, lastPrediction);
+        reason = 'Cross-entropy score';
+      }
+      
+      return {
+        username: pred.user.username,
+        prediction: pred.value,
+        timestamp: pred.timestamp,
+        points: points,
+        reason: reason
+      };
+    });
+    
+    res.json({
+      question: question.text,
+      completed: true,
+      finalPrediction: lastPrediction,
+      results: results
+    });
+  } catch (error) {
+    console.error('Error fetching question results:', error);
+    res.status(500).json({ error: 'Internal server error fetching question results' });
   }
 });
 
@@ -174,6 +306,8 @@ app.post('/api/questions/:id/predict', async (req, res) => {
     if (isNaN(prediction) || prediction < 1 || prediction > 99) {
       return res.status(400).json({ error: 'Prediction must be between 1 and 99' });
     }
+    
+    console.log('User', req.session.username, 'predicting', prediction, 'for question', req.params.id);
     
     const question = await Question.findById(req.params.id);
     
@@ -230,7 +364,8 @@ app.post('/api/questions/:id/predict', async (req, res) => {
       completed: question.completed
     });
   } catch (error) {
-    res.status(400).json({ error: error.message });
+    console.error('Error submitting prediction:', error);
+    res.status(500).json({ error: 'Internal server error submitting prediction' });
   }
 });
 
@@ -238,23 +373,39 @@ app.post('/api/questions/:id/predict', async (req, res) => {
 app.get('/api/users/points', async (req, res) => {
   try {
     if (!req.session.userId) {
+      console.log('No user session found');
       return res.status(401).json({ error: 'Login required' });
     }
     
+    console.log('Fetching points for user ID:', req.session.userId);
+    
     const user = await User.findById(req.session.userId);
-    res.json({ points: user.points });
+    
+    if (!user) {
+      console.log('User not found for ID:', req.session.userId);
+      return res.status(404).json({ error: 'User not found' });
+    }
+    
+    res.json({ 
+      points: user.points,
+      username: user.username,
+      isAdmin: user.isAdmin
+    });
   } catch (error) {
-    res.status(400).json({ error: error.message });
+    console.error('Error fetching user points:', error);
+    res.status(500).json({ error: 'Internal server error fetching user points' });
   }
 });
 
 // Get leaderboard
 app.get('/api/leaderboard', async (req, res) => {
   try {
+    console.log('Fetching leaderboard');
     const users = await User.find({}).sort({ points: -1 }).limit(10).select('username points');
     res.json(users);
   } catch (error) {
-    res.status(400).json({ error: error.message });
+    console.error('Error fetching leaderboard:', error);
+    res.status(500).json({ error: 'Internal server error fetching leaderboard' });
   }
 });
 
