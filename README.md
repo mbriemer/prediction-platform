@@ -1,4 +1,4 @@
-An implementation of a self-resolving prediction platform as described in [Self-Resolving Prediction Markets for Unverifiable Outcomes](https://arxiv.org/abs/2306.04305) by Srinivasan, Karger, and Chen.
+An implementation of a self-resolving prediction platform as described in [Self-Resolving Prediction Markets for Unverifiable Outcomes](https://arxiv.org/abs/2306.04305) by Srinivasan, Karger, and Chen. Also an experiment in heavily coding with AI.
 
 # Setup
 
