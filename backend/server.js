@@ -76,25 +76,26 @@ app.use(session({
 }));
 
 // Helper Functions
-function calculateCrossEntropy(prediction, lastPrediction) {
-  // Convert percentage to probability (0-1 range)
-  const p = prediction / 100;
-  const q = lastPrediction / 100;
-  
-  // Cross-entropy formula: -[p*log(q) + (1-p)*log(1-q)]
-  // Higher values mean worse prediction (more "surprised")
-  // We want to reward better predictions, so we invert this
+function calculateCrossEntropy(agentPrediction, marketPrediction, referencePrediction = 0.5) {
+  // Convert percentages to probabilities (0-1 range)
+  const q_t = agentPrediction / 100;
+  const q_t_minus_1 = marketPrediction / 100;
+  const r = referencePrediction;
   
   // Avoid log(0) errors with small epsilon
   const epsilon = 0.0001;
-  const crossEntropy = -(
-    p * Math.log(q + epsilon) + 
-    (1 - p) * Math.log(1 - q + epsilon)
-  );
   
-  // Scale to a reasonable point value (0-10 range)
-  // Lower cross-entropy means better prediction
-  return Math.max(0, 10 - crossEntropy);
+  // For binary prediction, we need to handle both outcomes
+  // S_CEM(r, q^(t), q^(t-1)) = -H(r, q^(t)) + H(r, q^(t-1)) = Σ_i r_i log(q_i^(t)/q_i^(t-1))
+  
+  // For i=1 (the event happens with probability r)
+  const term1 = r * Math.log((q_t + epsilon) / (q_t_minus_1 + epsilon));
+  
+  // For i=0 (the event doesn't happen with probability 1-r)
+  const term2 = (1 - r) * Math.log(((1 - q_t) + epsilon) / ((1 - q_t_minus_1) + epsilon));
+  
+  // Sum both terms
+  return term1 + term2;
 }
 
 // ===== ROUTES =====
@@ -293,7 +294,7 @@ app.get('/api/questions/:id/results', async (req, res) => {
   }
 });
 
-// User Predictions
+// User Predictions - Modified to use the new CE-MSR
 app.post('/api/questions/:id/predict', async (req, res) => {
   try {
     if (!req.session.userId) {
@@ -315,6 +316,15 @@ app.post('/api/questions/:id/predict', async (req, res) => {
       return res.status(400).json({ error: 'Question is not active' });
     }
     
+    // Get previous market prediction (or use 50/50 as initial prediction)
+    const prevPredictions = question.predictions;
+    const marketPrediction = prevPredictions.length > 0 
+      ? prevPredictions[prevPredictions.length - 1].value 
+      : 50;
+    
+    // Reference prediction (using 50/50 as default)
+    const referencePrediction = 0.5;
+    
     // Add the prediction
     question.predictions.push({
       user: req.session.userId,
@@ -329,7 +339,6 @@ app.post('/api/questions/:id/predict', async (req, res) => {
       
       // Distribute points to users
       const predictions = question.predictions;
-      const lastPrediction = predictions[predictions.length - 1].value;
       const k = question.parameters.k;
       const R = question.parameters.R;
       
@@ -346,12 +355,13 @@ app.post('/api/questions/:id/predict', async (req, res) => {
         }
       }
       
-      // Earlier users get points based on cross-entropy
-      for (let i = 0; i < predictions.length - lastKIndices; i++) {
+      // Earlier users get points based on CE-MSR
+      for (let i = 1; i < predictions.length - lastKIndices; i++) {
         const userId = predictions[i].user;
         if (!lastKUserIds.includes(userId)) {
-          const userPrediction = predictions[i].value;
-          const points = calculateCrossEntropy(userPrediction, lastPrediction);
+          const agentPrediction = predictions[i].value;
+          const prevMarketPrediction = i > 0 ? predictions[i-1].value : 50; // Use 50 as initial prediction
+          const points = calculateCrossEntropy(agentPrediction, prevMarketPrediction, referencePrediction);
           await User.findByIdAndUpdate(userId, { $inc: { points: points } });
         }
       }
