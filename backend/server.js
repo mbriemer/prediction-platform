@@ -202,7 +202,29 @@ app.get('/api/questions', async (req, res) => {
   try {
     console.log('Fetching all questions');
     const questions = await Question.find({ isActive: true });
-    res.json(questions);
+    
+    // If user is logged in, check which questions they've predicted on
+    if (req.session.userId) {
+      // Create a simple array to send to the client
+      const questionsWithUserData = await Promise.all(questions.map(async (question) => {
+        // Convert to plain object
+        const plainQuestion = question.toObject();
+        
+        // Check if user has predicted on this question
+        const hasPredicted = question.predictions.some(
+          pred => pred.user && pred.user.toString() === req.session.userId.toString()
+        );
+        
+        // Add flag directly to the object
+        plainQuestion.userHasPredicted = hasPredicted;
+        
+        return plainQuestion;
+      }));
+      
+      res.json(questionsWithUserData);
+    } else {
+      res.json(questions);
+    }
   } catch (error) {
     console.error('Error fetching questions:', error);
     res.status(500).json({ error: 'Internal server error fetching questions' });
@@ -294,7 +316,7 @@ app.get('/api/questions/:id/results', async (req, res) => {
   }
 });
 
-// User Predictions - Modified to use the new CE-MSR
+// User Predictions
 app.post('/api/questions/:id/predict', async (req, res) => {
   try {
     if (!req.session.userId) {
@@ -308,22 +330,20 @@ app.post('/api/questions/:id/predict', async (req, res) => {
       return res.status(400).json({ error: 'Prediction must be between 1 and 99' });
     }
     
-    console.log('User', req.session.username, 'predicting', prediction, 'for question', req.params.id);
-    
     const question = await Question.findById(req.params.id);
     
     if (!question || !question.isActive || question.completed) {
       return res.status(400).json({ error: 'Question is not active' });
     }
     
-    // Get previous market prediction (or use 50/50 as initial prediction)
-    const prevPredictions = question.predictions;
-    const marketPrediction = prevPredictions.length > 0 
-      ? prevPredictions[prevPredictions.length - 1].value 
-      : 50;
+    // Check if user has already made a prediction for this question
+    const existingPrediction = question.predictions.find(
+      pred => pred.user.toString() === req.session.userId.toString()
+    );
     
-    // Reference prediction (using 50/50 as default)
-    const referencePrediction = 0.5;
+    if (existingPrediction) {
+      return res.status(400).json({ error: 'You have already made a prediction for this question' });
+    }
     
     // Add the prediction
     question.predictions.push({
@@ -342,26 +362,31 @@ app.post('/api/questions/:id/predict', async (req, res) => {
       const k = question.parameters.k;
       const R = question.parameters.R;
       
-      // Last k users get R points each
-      const lastKIndices = Math.min(k, predictions.length);
+      // Only the last k users get R points
+      const totalPredictions = predictions.length;
       const lastKUserIds = [];
       
-      for (let i = 1; i <= lastKIndices; i++) {
-        const userIndex = predictions.length - i;
+      for (let i = 0; i < k && i < totalPredictions; i++) {
+        const userIndex = totalPredictions - 1 - i;
         if (userIndex >= 0) {
           const userId = predictions[userIndex].user;
-          lastKUserIds.push(userId);
+          lastKUserIds.push(userId.toString()); // Convert ObjectId to string for comparison
           await User.findByIdAndUpdate(userId, { $inc: { points: R } });
         }
       }
       
       // Earlier users get points based on CE-MSR
-      for (let i = 1; i < predictions.length - lastKIndices; i++) {
+      for (let i = 0; i < totalPredictions - k; i++) {
         const userId = predictions[i].user;
-        if (!lastKUserIds.includes(userId)) {
+        const userIdStr = userId.toString(); // Convert ObjectId to string
+        
+        // Ensure this user is not in the last k users
+        if (!lastKUserIds.includes(userIdStr)) {
           const agentPrediction = predictions[i].value;
-          const prevMarketPrediction = i > 0 ? predictions[i-1].value : 50; // Use 50 as initial prediction
-          const points = calculateCrossEntropy(agentPrediction, prevMarketPrediction, referencePrediction);
+          const marketPrediction = i > 0 ? predictions[i-1].value : 50; // Use 50 as initial prediction
+          const referencePrediction = 0.5; // Default reference prediction
+          
+          const points = calculateCrossEntropy(agentPrediction, marketPrediction, referencePrediction);
           await User.findByIdAndUpdate(userId, { $inc: { points: points } });
         }
       }

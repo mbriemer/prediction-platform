@@ -16,6 +16,8 @@ function QuestionDetail() {
   const [results, setResults] = useState(null);
   const [error, setError] = useState(null);
   const [user, setUser] = useState(null);
+  const [hasAlreadyPredicted, setHasAlreadyPredicted] = useState(false);
+  const [currentUserPrediction, setCurrentUserPrediction] = useState(null);
   
   useEffect(() => {
     // Check if user is logged in
@@ -56,6 +58,23 @@ function QuestionDetail() {
     
     fetchQuestionDetails();
   }, [id, navigate]);
+
+  useEffect(() => {
+    // Check if user has already made a prediction for this question
+    if (question && user) {
+      const userPrediction = question.predictions.find(
+        pred => pred.user.username === user.username
+      );
+      
+      if (userPrediction) {
+        setHasAlreadyPredicted(true);
+        setCurrentUserPrediction(userPrediction);
+      } else {
+        setHasAlreadyPredicted(false);
+        setCurrentUserPrediction(null);
+      }
+    }
+  }, [question, user]);  
   
   const handleSubmitPrediction = async (e) => {
     e.preventDefault();
@@ -74,11 +93,21 @@ function QuestionDetail() {
         // Refresh to show updated predictions
         const questionResponse = await axios.get(`/api/questions/${id}`);
         setQuestion(questionResponse.data);
+        setHasAlreadyPredicted(true);
       }
     } catch (error) {
-      alert('Failed to submit prediction: ' + error.response?.data?.error || 'Unknown error');
+      if (error.response?.status === 400 && error.response?.data?.error === 'You have already made a prediction for this question') {
+        alert('You have already made a prediction for this question.');
+        // Refresh to update the UI state
+        const questionResponse = await axios.get(`/api/questions/${id}`);
+        setQuestion(questionResponse.data);
+        setHasAlreadyPredicted(true);
+      } else {
+        alert('Failed to submit prediction: ' + error.response?.data?.error || 'Unknown error');
+      }
     }
   };
+  
 
   const handleLogout = async () => {
     try {
@@ -128,23 +157,37 @@ function QuestionDetail() {
                 <h4>Make a Prediction</h4>
               </div>
               <div className="card-body">
-                <form onSubmit={handleSubmitPrediction}>
-                  <div className="mb-3">
-                    <label className="form-label">Your prediction (1-99%)</label>
-                    <input 
-                      type="range" 
-                      className="form-range" 
-                      min="1" 
-                      max="99" 
-                      value={prediction} 
-                      onChange={(e) => setPrediction(Number(e.target.value))} 
-                    />
-                    <div className="text-center">
-                      <strong>{prediction}%</strong>
+                {hasAlreadyPredicted ? (
+                  <div>
+                    <div className="alert alert-info">
+                      <strong>You've already predicted:</strong> {currentUserPrediction?.value}%
                     </div>
+                    <p>You can only make one prediction per question.</p>
                   </div>
-                  <button type="submit" className="btn btn-success">Submit Prediction</button>
-                </form>
+                ) : (
+                  <form onSubmit={handleSubmitPrediction}>
+                    <div className="mb-3">
+                      <label className="form-label">Your prediction (1-99%)</label>
+                      <input 
+                        type="range" 
+                        className="form-range" 
+                        min="1" 
+                        max="99" 
+                        value={prediction} 
+                        onChange={(e) => setPrediction(Number(e.target.value))} 
+                      />
+                      <div className="text-center">
+                        <strong>{prediction}%</strong>
+                      </div>
+                    </div>
+                    <button type="submit" className="btn btn-success">Submit Prediction</button>
+                    <div className="mt-3">
+                      <small className="text-muted">
+                        Note: You can only make one prediction per question.
+                      </small>
+                    </div>
+                  </form>
+                )}
               </div>
             </div>
           )}
@@ -333,6 +376,10 @@ function Home() {
     return <div className="container mt-5"><p>Loading...</p></div>;
   }
 
+  const hasUserPredicted = (question) => {
+    return question._doc?.userHasPredicted || false;
+  };
+
   return (
     <div className="container mt-5">
       <h1>Prediction Platform</h1>
@@ -493,10 +540,15 @@ function Home() {
                         Parameters: R={question.parameters.R}, k={question.parameters.k}, α={question.parameters.alpha}
                       </p>
                       <div className="d-flex justify-content-between align-items-center mt-2">
-                        {question.completed ? 
-                          <span className="badge bg-secondary">Completed</span> : 
-                          <span className="badge bg-success">Active</span>
-                        }
+                        <div>
+                          {question.completed ? 
+                            <span className="badge bg-secondary me-2">Completed</span> : 
+                            <span className="badge bg-success me-2">Active</span>
+                          }
+                          {question.userHasPredicted && 
+                            <span className="badge bg-info me-2">You predicted</span>
+                          }
+                        </div>
                         <button 
                           className="btn btn-primary btn-sm"
                           onClick={() => viewQuestionDetails(question._id)}
