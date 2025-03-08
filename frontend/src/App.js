@@ -267,9 +267,9 @@ function Home() {
   
   // Question creation form state
   const [questionText, setQuestionText] = useState('');
-  const [rValue, setRValue] = useState(10);
-  const [kValue, setKValue] = useState(3);
-  const [alphaValue, setAlphaValue] = useState(0.2);
+  const [rValue, setRValue] = useState('10');
+  const [kValue, setKValue] = useState('3');
+  const [alphaValue, setAlphaValue] = useState('0.2');
 
   useEffect(() => {
     // Check if user is already logged in
@@ -353,21 +353,36 @@ function Home() {
 
   const handleCreateQuestion = async (e) => {
     e.preventDefault();
+    
+    // Validate inputs and convert to numbers
+    const R = Number(rValue);
+    const k = Number(kValue);
+    const alpha = Number(alphaValue);
+    
+    // Check for valid numbers
+    if (isNaN(R) || R <= 0 || isNaN(k) || k <= 0 || isNaN(alpha) || alpha <= 0 || alpha >= 1) {
+      alert('Please enter valid parameter values: R and k must be positive numbers, and alpha must be between 0 and 1.');
+      return;
+    }
+    
     try {
       await axios.post('/api/questions', {
         text: questionText,
-        R: rValue,
-        k: kValue,
-        alpha: alphaValue
+        R: R,
+        k: k,
+        alpha: alpha
       });
       alert('Question created successfully!');
       setQuestionText('');
+      setRValue('10'); // Reset to default values as strings
+      setKValue('3');
+      setAlphaValue('0.2');
       fetchQuestions();
     } catch (error) {
       alert('Failed to create question: ' + error.response?.data?.error || 'Unknown error');
     }
   };
-
+  
   const viewQuestionDetails = (id) => {
     navigate(`/questions/${id}`);
   };
@@ -481,10 +496,10 @@ function Home() {
                     <div className="col-md-4 mb-3">
                       <label className="form-label">R (Points for last k users)</label>
                       <input 
-                        type="number" 
+                        type="text" 
                         className="form-control" 
                         value={rValue} 
-                        onChange={(e) => setRValue(Number(e.target.value))} 
+                        onChange={(e) => setRValue(e.target.value)} 
                         min="1"
                         required 
                       />
@@ -492,10 +507,10 @@ function Home() {
                     <div className="col-md-4 mb-3">
                       <label className="form-label">k (Number of users to reward)</label>
                       <input 
-                        type="number" 
+                        type="text" 
                         className="form-control" 
                         value={kValue} 
-                        onChange={(e) => setKValue(Number(e.target.value))} 
+                        onChange={(e) => setKValue(e.target.value)} 
                         min="1"
                         required 
                       />
@@ -503,13 +518,10 @@ function Home() {
                     <div className="col-md-4 mb-3">
                       <label className="form-label">Alpha (End probability)</label>
                       <input 
-                        type="number" 
+                        type="text" 
                         className="form-control" 
                         value={alphaValue} 
-                        onChange={(e) => setAlphaValue(Number(e.target.value))} 
-                        min="0.01"
-                        max="0.99"
-                        step="0.01"
+                        onChange={(e) => setAlphaValue(e.target.value)} 
                         required 
                       />
                     </div>
