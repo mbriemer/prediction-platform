@@ -263,7 +263,6 @@ function Home() {
   // Registration form state
   const [regUsername, setRegUsername] = useState('');
   const [regPassword, setRegPassword] = useState('');
-  const [isAdmin, setIsAdmin] = useState(false);
   
   // Question creation form state
   const [questionText, setQuestionText] = useState('');
@@ -331,12 +330,12 @@ function Home() {
       await axios.post('/api/register', { 
         username: regUsername, 
         password: regPassword,
-        isAdmin
+        isAdmin: false // Always false now, no longer from state
       });
       alert('Registration successful! You can now log in.');
       setRegUsername('');
       setRegPassword('');
-      setIsAdmin(false);
+      // No need to reset isAdmin state since we're not using it anymore
     } catch (error) {
       alert('Registration failed: ' + error.response?.data?.error || 'Unknown error');
     }
@@ -451,16 +450,7 @@ function Home() {
                   required 
                 />
               </div>
-              <div className="mb-3 form-check">
-                <input 
-                  type="checkbox" 
-                  className="form-check-input" 
-                  id="isAdmin"
-                  checked={isAdmin}
-                  onChange={(e) => setIsAdmin(e.target.checked)} 
-                />
-                <label className="form-check-label" htmlFor="isAdmin">Register as Admin</label>
-              </div>
+              {/* Admin checkbox removed */}
               <button type="submit" className="btn btn-success">Register</button>
             </form>
           </div>

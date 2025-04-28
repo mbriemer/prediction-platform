@@ -102,7 +102,7 @@ function calculateCrossEntropy(agentPrediction, marketPrediction, referencePredi
 // User Authentication
 app.post('/api/register', async (req, res) => {
   try {
-    const { username, password, isAdmin } = req.body;
+    const { username, password } = req.body;
     console.log('Registration attempt for:', username);
     
     // Check if user already exists
@@ -116,7 +116,7 @@ app.post('/api/register', async (req, res) => {
     const user = new User({
       username,
       password: hashedPassword,
-      isAdmin: isAdmin || false
+      isAdmin: false // Force isAdmin to always be false, ignoring the request body
     });
     
     await user.save();
