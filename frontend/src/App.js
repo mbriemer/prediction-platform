@@ -2,6 +2,7 @@
 import React, { useState, useEffect } from 'react';
 import { BrowserRouter as Router, Route, Routes, Link, useParams, useNavigate } from 'react-router-dom';
 import axios from 'axios';
+import FAQ from './FAQ';
 
 // Set up axios defaults
 axios.defaults.withCredentials = true;
@@ -464,6 +465,11 @@ function Home() {
               <button onClick={handleLogout} className="btn btn-secondary">Logout</button>
             </div>
           </div>
+
+          <div className="d-flex justify-content-between align-items-center mb-4">
+            <h1>Prediction Platform</h1>
+            <Link to="/faq" className="btn btn-info">FAQ</Link>
+          </div>
           
           {user.isAdmin && (
             <div className="card mb-4">
@@ -597,6 +603,7 @@ function App() {
       <Routes>
         <Route path="/" element={<Home />} />
         <Route path="/questions/:id" element={<QuestionDetail />} />
+        <Route path="/faq" element={<FAQ />} />
       </Routes>
     </Router>
   );
