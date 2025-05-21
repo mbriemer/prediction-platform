@@ -3,9 +3,11 @@ import React, { useState, useEffect } from 'react';
 import { BrowserRouter as Router, Route, Routes, Link, useParams, useNavigate } from 'react-router-dom';
 import axios from 'axios';
 import FAQ from './FAQ';
+import config from './config';
 
 // Set up axios defaults
 axios.defaults.withCredentials = true;
+axios.defaults.baseURL = config.apiUrl;
 
 // Question Detail Page
 function QuestionDetail() {

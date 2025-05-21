@@ -5,25 +5,20 @@ const bcrypt = require('bcrypt');
 const mongoose = require('mongoose');
 const cors = require('cors');
 const app = express();
+const config = require('./config');
+
 
 // ===== DATABASE CONNECTION =====
 // Connect to MongoDB with proper error handling - this MUST be before defining models
 console.log('Connecting to MongoDB...');
-mongoose.connect('mongodb://127.0.0.1:27017/prediction-platform', {
-  useNewUrlParser: true,
-  useUnifiedTopology: true,
-  serverSelectionTimeoutMS: 5000 // Shorter timeout for faster feedback
-})
-.then(() => {
-  console.log('Connected to MongoDB successfully');
-})
-.catch(err => {
-  console.error('MongoDB connection error:', err);
-  console.log('Please make sure MongoDB is running at mongodb://127.0.0.1:27017');
-  // Don't exit, let's use memory store as fallback
-  console.log('Falling back to in-memory storage for development');
-  useMemoryStore = true;
-});
+mongoose.connect(config.db.uri, config.db.options)
+  .then(() => {
+    console.log('Connected to MongoDB successfully');
+  })
+  .catch(err => {
+    console.error('MongoDB connection error:', err);
+    console.log('Please make sure MongoDB is accessible');
+  });
 
 // ===== MODELS =====
 // User Schema
@@ -56,24 +51,13 @@ const Question = mongoose.model('Question', QuestionSchema);
 
 // ===== MIDDLEWARE =====
 // Enable CORS for development
-app.use(cors({
-  origin: 'http://localhost:3001', // Your React app's address
-  credentials: true // Allow cookies to be sent
-}));
+app.use(cors(config.server.cors));
 
 app.use(bodyParser.json());
 app.use(bodyParser.urlencoded({ extended: true }));
 
 // Session configuration
-app.use(session({
-  secret: 'prediction-platform-secret',
-  resave: false,
-  saveUninitialized: false,
-  cookie: { 
-    secure: false, // Set to true in production with HTTPS
-    maxAge: 24 * 60 * 60 * 1000 // 24 hours
-  }
-}));
+app.use(session(config.session));
 
 // Helper Functions
 function calculateCrossEntropy(agentPrediction, marketPrediction, referencePrediction = 0.5) {
@@ -445,7 +429,7 @@ app.get('/api/leaderboard', async (req, res) => {
 });
 
 // Start the server
-const PORT = process.env.PORT || 3000;
+const PORT = config.server.port;
 app.listen(PORT, () => {
-  console.log(`Server running on port ${PORT}`);
+  console.log(`Server running on port ${PORT} in ${process.env.NODE_ENV || 'development'} mode`);
 });
